@@ -138,10 +138,10 @@ def check(source) :
       results[partition]['LAG'] = ALERT.WARN
 
   # Return an array of results.
-  return [sum(1 if partition['LOG']    > ALERT.OKAY else 0 for partition in results) > half, # LOG ISSUE    :(more than 50%)
-          sum(1 if partition['OFFSET'] > ALERT.OKAY else 0 for partition in results) > 0,    # OFFSET ISSUE :(any)
-          sum(1 if partition['LAG']    > ALERT.OKAY else 0 for partition in results) > half, # LAG ISSUE    :(more than 50%)
-          results, errortext]                                                                # RAW DATA
+  return [sum(1 for partition in results if partition['LOG']    > ALERT.OKAY) > half, # LOG ISSUE    :(more than 50%)
+          sum(1 for partition in results if partition['OFFSET'] > ALERT.OKAY) > 0,    # OFFSET ISSUE :(any)
+          sum(1 for partition in results if partition['LAG']    > ALERT.OKAY) > half, # LAG ISSUE    :(more than 50%)
+          results, errortext]                                                         # RAW DATA
 
 def send_email(to, subject, text) :
   "Sends an email."
