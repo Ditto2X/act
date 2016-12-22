@@ -12,7 +12,15 @@ from email.mime.text import MIMEText
 DEBUG = False
 DUMP = False
 
-class HOURS:
+# Who to send emails to
+emailto = ['dwarness@actiance.com','afiaccone@actiance.com']
+
+# Threshold that lag becomes an issue
+class THRESHOLD :
+  LAG   = 10
+
+# Number of seconds in each hour
+class HOURS :
   ONE   = 60 * 60
   TWO   = ONE * 2
   THREE = ONE * 3
@@ -21,9 +29,9 @@ class HOURS:
   SIX   = ONE * 6
 
 class ALERT :
-  OKAY = 0
-  WARN = 1
-  CRIT = 2
+  OKAY  = 0
+  WARN  = 1
+  CRIT  = 2
 
 def elapsed(seconds) :
   "Return elapsed time until now."
@@ -100,41 +108,47 @@ def check(source) :
   size = len(source.keys())
   half = int(size / 2)
   results = [{'LOG' : ALERT.OKAY, 'OFFSET' : ALERT.OKAY, 'LAG' : ALERT.OKAY}] * size
+  errortext = []
 
   for partition in source :
     # No Data coming in.  Data Flow Issue.
     if (source[partition]['LOG'] == source[partition]['LOG_LAST']) and (source[partition]['LAG'] == 0) :
       if elapsed(source[partition]['LOG_CHANGED']) > HOURS.THREE :
-        DEBUG_PRINt("- %02d: ERROR: No data coming in." % partition)
+        DEBUG_PRINT("- %02d: ERROR: No data coming in." % partition)
+        errortext.append("- Partition %02d: No data coming in." % partition)
         results[partition]['LOG'] = ALERT.WARN
 
     # Queue Building Up:
     if source[partition]['OFFSET'] == source[partition]['OFFSET_LAST'] :
       if source[partition]['LAG'] > source[partition]['LAG_LAST'] :
         DEBUG_PRINT("- %02d: WARNING: Offset has not moved, but lag is moving." % partition)
+        errortext.append("- Partition %02d: Offset has not moved, but lag is moving." % partition )
         results[partition]['OFFSET'] = ALERT.WARN
       else :
         DEBUG_PRINT("- %02d: ERROR: Offset and Lag are not moving since last checked." % partition)
+        errortext.append("- Partition %02d: Offset and Lag are not moving." % partition )
         results[partition]['OFFSET'] = ALERT.CRIT
     elif source[partition]['OFFSET'] > source[partition]['OFFSET_LAST'] :
       DEBUG_PRINT("- %02d: SUCCESS: Offset is moving - All things are good." % partition)
 
     # Need Big Lag Condtiion
-    if source[partition]['LAG'] > 10 :
-      DEBUG_PRINT("- %02d: ERROR: Lag above 10." % partition)
+    if source[partition]['LAG'] > THRESHOLD.LAG :
+      DEBUG_PRINT("- %02d: ERROR: Lag above %d: %d" % (partition, THRESHOLD.LAG, source[partition]['LAG']))
+      errortext.append("- Partition %02d: Lag = %d." % (partition, source[partition]['LAG']))
       results[partition]['LAG'] = ALERT.WARN
 
   # Return an array of results.
-  return [sum(1 if partition['LOG'] > ALERT.OKAY else 0 for partition in results) > half, # LOG ISSUE    :(more than 50%)
-          sum(1 if partition['OFFSET'] > ALERT.OKAY else 0 for partition in results) > 0,  # OFFSET ISSUE :(any)
-          sum(1 if partition['LAG'] > ALERT.OKAY else 0 for partition in results) > half, # LAG ISSUE    :(more than 50%)
-          results]                                                                         # RAW DATA
+  return [sum(1 if partition['LOG']    > ALERT.OKAY else 0 for partition in results) > half, # LOG ISSUE    :(more than 50%)
+          sum(1 if partition['OFFSET'] > ALERT.OKAY else 0 for partition in results) > 0,    # OFFSET ISSUE :(any)
+          sum(1 if partition['LAG']    > ALERT.OKAY else 0 for partition in results) > half, # LAG ISSUE    :(more than 50%)
+          results, errortext]                                                                # RAW DATA
 
 def send_email(to, subject, text) :
+  "Sends an email."
   DEBUG_PRINT("SEND_EMAIL")
   msg = MIMEText(text, 'html')
   msg['Subject'] = subject
-  msg['To'] = to
+  msg['To'] = ','.join(to)
   msg['From'] = str('@'.join([getpass.getuser(), socket.gethostname()]))
 
   # msg.add_header('Content-Type','text/plain')
@@ -143,6 +157,7 @@ def send_email(to, subject, text) :
   s.quit()
 
 def parse() :
+  "Parse command line arguments."
   global DEBUG
   global DUMP
   parser = optparse.OptionParser()
@@ -159,21 +174,16 @@ problems = []
 
 for source in results :
   DEBUG_PRINT("%-45s:" % source)
-  log_issue, offset_issue, lag_issue, values = check(results[source])
-  if log_issue :
-    problems.append("%s: Log Size issue on more than half the paritions." % source)
-  if offset_issue :
-    problems.append("%s: Offset issue." % source)
-  if lag_issue :
-    problems.append("%s: Lag issue on more than half the paritions." % source)
+  log_issue, offset_issue, lag_issue, values, errors = check(results[source])
+  if log_issue or offset_issue or lag_issue :
+    problems.append("%s has the following issues:" % source)
+    problems.extend(errors)
   DEBUG_PRINT(str(values))
 
 if len(problems) > 0 :
   sources = "<BR>\n".join(problems)
-  mail_text = ("There were issues with the following Kafka queues:<BR><BR>" +
-               sources)
-  send_email('dwarness@actiance.com', 'Kafka issues ..', mail_text)
-
+  mail_text = ("There were issues with the following Kafka queues:<BR><BR>" + sources)
+  send_email(emailto, 'Kafka issues ..', mail_text)
 
 if DUMP :
   for source in results :
