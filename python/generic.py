@@ -1,20 +1,22 @@
 #!/usr/bin/env python
 
 import sys
-import optparse
+import argparse
 
 class Generic(object) :
   def __init__(self) :
     self.options = None
 
   def parse(self) :
-    parser = optparse.OptionParser()
-    parser.set_defaults(debug = False)
-    parser.add_option('--debug', help = 'Set DEBUG flag.', action = 'store_true', dest = 'debug')
-    (self.options, args) = parser.parse_args()
+    """ Parse command line arguments. """
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--debug', action='store_true', default=False, dest='debug',
+      help = 'Set DEBUG flag for extra output.')
+    self.options = parser.parse_args()
 
   def main(self) :
     self.parse()
 
-app = Generic()
-app.main()
+if __name__ == "__main__" :
+  app = Generic()
+  app.main()
