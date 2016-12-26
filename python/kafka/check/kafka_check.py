@@ -110,6 +110,8 @@ def check(source) :
   results = [{'LOG' : ALERT.OKAY, 'OFFSET' : ALERT.OKAY, 'LAG' : ALERT.OKAY}] * size
   errortext = []
 
+  DEBUG_PRINT("Size = %d, half = %d" % (size, half))
+
   for partition in source :
     # No Data coming in.  Data Flow Issue.
     if (source[partition]['LOG'] == source[partition]['LOG_LAST']) and (source[partition]['LAG'] == 0) :
@@ -136,6 +138,12 @@ def check(source) :
       DEBUG_PRINT("- %02d: ERROR: Lag above %d: %d" % (partition, THRESHOLD.LAG, source[partition]['LAG']))
       errortext.append("- Partition %02d: Lag = %d." % (partition, source[partition]['LAG']))
       results[partition]['LAG'] = ALERT.WARN
+
+  DEBUG_PRINT("Alert results: LOG = %d, OFFSET = %d, LAG = %d" % (
+    sum(1 for partition in results if partition['LOG'] > ALERT.OKAY),
+    sum(1 for partition in results if partition['OFFSET'] > ALERT.OKAY), 
+    sum(1 for partition in results if partition['LAG'] > ALERT.OKAY)))
+    
 
   # Return an array of results.
   return [sum(1 for partition in results if partition['LOG']    > ALERT.OKAY) > half, # LOG ISSUE    :(more than 50%)
@@ -180,7 +188,7 @@ for source in results :
     problems.extend(errors)
   DEBUG_PRINT(str(values))
 
-if len(problems) > 0 :
+if len(problems) > 0 and not DEBUG :
   sources = "<BR>\n".join(problems)
   mail_text = ("There were issues with the following Kafka queues:<BR><BR>" + sources)
   send_email(emailto, 'Kafka issues ..', mail_text)
