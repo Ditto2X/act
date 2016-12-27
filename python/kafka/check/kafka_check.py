@@ -107,7 +107,7 @@ def check(source) :
   "Implementing Alan's logic."
   size = len(source.keys())
   half = int(size / 2)
-  results = [{'LOG' : ALERT.OKAY, 'OFFSET' : ALERT.OKAY, 'LAG' : ALERT.OKAY}] * size
+  results = [{'LOG' : ALERT.OKAY, 'OFFSET' : ALERT.OKAY, 'LAG' : ALERT.OKAY} for x in range(size)]
   errortext = []
 
   DEBUG_PRINT("Size = %d, half = %d" % (size, half))
