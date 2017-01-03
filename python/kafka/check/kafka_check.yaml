@@ -1,0 +1,10 @@
+---
+emailto:
+- 'email1@someplace.com'
+- 'email2@someplace.com'
+
+smtpserver: 'smtp.someplace.com'
+
+threshold:
+  exportconsumers-export:
+    LAG: 50000

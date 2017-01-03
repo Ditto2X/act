@@ -1,23 +1,22 @@
 #!/usr/bin/env python
 
+import os
 import MySQLdb
 import sys
 import time
-import optparse
+import argparse
 import socket                          # for hostname
 import getpass                         # for username
 import smtplib
 from email.mime.text import MIMEText
+import yaml
 
-DEBUG = False
-DUMP = False
+# DEBUG = False
 
 # Who to send emails to
-emailto = ['dwarness@actiance.com','afiaccone@actiance.com']
-
-# Threshold that lag becomes an issue
-class THRESHOLD :
-  LAG   = 10
+# emailto = ['dwarness@actiance.com','afiaccone@actiance.com']
+config = {}
+options = {}
 
 # Number of seconds in each hour
 class HOURS :
@@ -49,8 +48,8 @@ def makedifftime(seconds) :
   return "%02d-%02d:%02d:%02d" % (d, h, m, s)
 
 def DEBUG_PRINT(string) :
-  "Print string only if DEBUG == True"
-  if DEBUG :
+  "Print string only if options.DEBUG == True"
+  if options.DEBUG :
     print string
 
 def loaddata(timerange) :
@@ -103,7 +102,7 @@ def loaddata(timerange) :
   connection.close()
   return results
 
-def check(source) :
+def check(source, thresholds) :
   "Implementing Alan's logic."
   size = len(source.keys())
   half = int(size / 2)
@@ -111,6 +110,7 @@ def check(source) :
   errortext = []
 
   DEBUG_PRINT("Size = %d, half = %d" % (size, half))
+  DEBUG_PRINT("Thresholds = %s" % str(thresholds))
 
   for partition in source :
     # No Data coming in.  Data Flow Issue.
@@ -134,8 +134,8 @@ def check(source) :
       DEBUG_PRINT("- %02d: SUCCESS: Offset is moving - All things are good." % partition)
 
     # Need Big Lag Condtiion
-    if source[partition]['LAG'] > THRESHOLD.LAG :
-      DEBUG_PRINT("- %02d: ERROR: Lag above %d: %d" % (partition, THRESHOLD.LAG, source[partition]['LAG']))
+    if source[partition]['LAG'] > thresholds['LAG'] :
+      DEBUG_PRINT("- %02d: ERROR: Lag above %d: %d" % (partition, thresholds['LAG'], source[partition]['LAG']))
       errortext.append("- Partition %02d: Lag = %d." % (partition, source[partition]['LAG']))
       results[partition]['LAG'] = ALERT.WARN
 
@@ -159,44 +159,65 @@ def send_email(to, subject, text) :
   msg['To'] = ','.join(to)
   msg['From'] = str('@'.join([getpass.getuser(), socket.gethostname()]))
 
-  # msg.add_header('Content-Type','text/plain')
   s = smtplib.SMTP('smtp.actiance.local')
   s.sendmail(msg['From'], msg['To'], msg.as_string())
   s.quit()
 
 def parse() :
   "Parse command line arguments."
-  global DEBUG
-  global DUMP
-  parser = optparse.OptionParser()
-  parser.set_defaults(debug = False, dump = False)
-  parser.add_option('--debug', action = 'store_true', dest = 'debug')
-  parser.add_option('--dump', action = 'store_true', dest = 'dump')
-  (options, args) = parser.parse_args()
-  DEBUG = options.debug
-  DUMP = options.dump
+  global options
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--debug', action='store_true', default=False, dest='DEBUG',
+    help = 'Set DEBUG flag for extra output.')
+  parser.add_argument('--dump', action = 'store_true', default=False, dest = 'DUMP')
+  parser.add_argument('-e', '--emailto', nargs = '+', default = config.get('emailto', 
+    ['dwarness@actiance.com']), dest = 'emailto', help = 'To whom to send alerts to.')
+  parser.add_argument('-s', '--smtp', action = 'store', default = config.get('smtpserver', 
+    'smtp.actiance.local'), dest = 'smtp', help = 'SMTP server to use.')
+  options = parser.parse_args()
 
-parse()
-results = loaddata(elapsed(HOURS.FOUR))
-problems = []
+def build_threshold(source) :
+  defaults = {'LAG': 50, 'OFFSET': 0, 'LOG': 0 }
+  threshold = {}
 
-for source in results :
-  DEBUG_PRINT("%-45s:" % source)
-  log_issue, offset_issue, lag_issue, values, errors = check(results[source])
-  if log_issue or offset_issue or lag_issue :
-    problems.append("%s has the following issues:" % source)
-    problems.extend(errors)
-  DEBUG_PRINT(str(values))
+  if source in config['threshold'].keys() :
+    for key in defaults :
+      threshold[key] = config['threshold'][source].get(key, defaults[key])
+    return threshold
 
-if len(problems) > 0 and not DEBUG :
-  sources = "<BR>\n".join(problems)
-  mail_text = ("There were issues with the following Kafka queues:<BR><BR>" + sources)
-  send_email(emailto, 'Kafka issues ..', mail_text)
+  return defaults
 
-if DUMP :
+def main() :
+  global config
+  # Load external configuration file if one exists.
+  configyaml = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kafka_check.yaml')
+  if os.path.exists(configyaml) :
+    with open(configyaml, 'r') as yamlfile :
+      config = yaml.load(yamlfile)
+
+  # Parse command line arguments.
+  parse()
+
+  # Load data from the past four hours from the database.
+  results = loaddata(elapsed(HOURS.FOUR))
+  problems = []
+
   for source in results :
-    for partition in results[source] :
-      log_changed = results[source][partition]['LOG_CHANGED']
-      print "%-45s[%02d]: %d (%s)" % (source, partition, log_changed, makedifftime(log_changed))
+    DEBUG_PRINT("%-45s:" % source)
+    log_issue, offset_issue, lag_issue, values, errors = check(results[source], build_threshold(source))
+    if log_issue or offset_issue or lag_issue :
+      problems.append("%s has the following issues:" % source)
+      problems.extend(errors)
+    DEBUG_PRINT(str(values))
 
-sys.exit()
+  DEBUG_PRINT("Email recepients: %s" % ','.join(options.emailto))
+  DEBUG_PRINT("Email Server: %s" % options.smtp)
+  if len(problems) > 0 and not options.DEBUG :
+    sources = "<BR>\n".join(problems)
+    mail_text = ("There were issues with the following Kafka queues:<BR><BR>" + sources)
+    send_email(options.emailto, 'Kafka issues ..', mail_text)
+
+  sys.exit()
+
+if __name__ == "__main__" :
+  main()
