@@ -11,10 +11,6 @@ import smtplib
 from email.mime.text import MIMEText
 import yaml
 
-# DEBUG = False
-
-# Who to send emails to
-# emailto = ['dwarness@actiance.com','afiaccone@actiance.com']
 config = {}
 options = {}
 
