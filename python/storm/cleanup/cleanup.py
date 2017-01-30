@@ -8,10 +8,14 @@ import shutil
 import yaml
 import fcntl
 # from pymongo import MongoClient
+sys.path.remove('/usr/local/lib/python2.7/dist-packages')
 from pymongo import Connection
-from datetime import datetime
+from datetime import datetime, timedelta
+
 
 class Cleanup(object) :
+  PURGE = 0
+  APPLOG = 1
   def __init__(self) :
     self.options = None
     self.client = None
@@ -19,11 +23,11 @@ class Cleanup(object) :
     self.databases = None
     self.directory = None
     self.config = None
-    self.logfile = 'purge.' + datetime.now().strftime('%Y%m%d-%H%M')
+    self.logfiles = ['purge.' + datetime.now().strftime('%Y%m%d-%H%M'), 'cleanup.log']
     self.scriptdir = os.path.dirname(os.path.abspath(__file__))
 
-    if os.path.exists(os.path.join(self.scriptdir, 'config.yaml')) :
-      with open(os.path.join(self.scriptdir, 'config.yaml'), 'r') as yamlfile :
+    if os.path.exists(os.path.join(self.scriptdir, 'cleanup.yaml')) :
+      with open(os.path.join(self.scriptdir, 'cleanup.yaml'), 'r') as yamlfile :
         self.config = yaml.load(yamlfile)
 
   def parse(self) :
@@ -31,8 +35,7 @@ class Cleanup(object) :
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', action='store_true', default=False, dest='debug',
       help = 'Set DEBUG flag for extra output.')
-    parser.add_argument('-d', '--dir', action = 'store', dest = 'dir',
-      help = 'Directory to process.')
+    parser.add_argument('-d', '--dir', nargs = "+", dest = 'dir', help = 'Directory to process.')
     parser.add_argument('--dbs', nargs = '+', type = str, dest = 'dbs', metavar = 'DB',
       help = 'Mongo Databases to query.')
     parser.add_argument('-m', '--mongo', nargs = '+', type = str, dest = 'mongo', metavar = 'SERVER:27017',
@@ -68,15 +71,15 @@ class Cleanup(object) :
         print "Please specify a directory to search (-d)."
         sys.exit()
 
-  def log(self, string) :
+  def log(self, which, string) :
     """ Creates a directory "logs" where the executible lives and writes string to a file in that directory. """
     path = os.path.join(self.scriptdir, 'logs')
 
     if not os.path.isdir(path) :
       os.makedirs(path)
 
-    with open(os.path.join(path, self.logfile), 'a') as logfile :
-      logfile.write(string + "\n")
+    with open(os.path.join(path, self.logfiles[which]), 'a') as logfile :
+      logfile.write(datetime.now().strftime('%Y%m%d-%H:%M:%SUTC') + ": " + string + "\n")
 
   def get_mongo(self) :
     """ Creates a connection to MongoDB and stores it for future use. """
@@ -89,29 +92,57 @@ class Cleanup(object) :
     """ Check mongo if ID exists and the current status """
     states = [ 'CANCELLED', 'FAILED', 'COMPLETED', 'COMPLETEDWITHWARNING', 'MERGE_FAILED', 'UPLOAD_FAILED']
     mongo = self.get_mongo()
+    logstring = ("{_id}:\n"
+                 "- Status      : {status}\n"
+                 "- Name        : {name}\n"
+                 "- Created Time: {createdTime} UTC\n"
+                 "- End Time    : {endTime} UTC\n"
+                 "- Snapshot    : {snapshotCount}")
+    logcancel = ("{_id}:\n"
+                 "- Status      : {status}\n"
+                 "- Name        : {name}\n"
+                 "- Created Time: {createdTime} UTC\n"
+                 "- Snapshot    : {snapshotCount}")
 
     for database in self.databases :
       db = mongo[database]
       result = db.job_request_config.find({'_id': id.split('_')[0]}) 
-      if result.count() > 0 and (list(result)[0]['status'] in states) :
-        return True
+#      if result.count() > 0 and (list(result)[0]['status'] in states) :
+      if result.count() > 0 :
+        item = list(result)[0]
+        now = datetime.utcnow()
+        try :
+          if (item['status'] in states) and ((now - item['endTime']) > timedelta(minutes=30)) :
+            self.log(self.APPLOG, logstring.format(**item))
+            return True
+        except KeyError :
+          if item['status'] == u'CANCELLED' :
+            self.log(self.APPLOG, logcancel.format(**item))
+            return True
     return False
 
-  def process_dir(self, location) :
+  def process_dir(self, locations) :
     """ Check location (directory) for entries and verify that they're safe to delete. """
+    before = datetime.now().date() - timedelta(2)
     patt = re.compile(r"""
       \w{8}-\w{4}-\w{4}-\w{4}-\w{12}
       """, re.VERBOSE)
+    patt2 = re.compile(r"""
+      \d{4}-\d{2}-\d{2}
+      """, re.VERBOSE)
 
-    for directory in os.listdir(location) :
-      if patt.match(directory) :
-        if self.check_mongo(directory) :
-          self.log("CANDIDATE: %s" %  directory)
+    for location in locations :
+      for directory in os.listdir(location) :
+        if (patt.match(directory) and self.check_mongo(directory)) or (patt2.match(directory) and 
+          (datetime.strptime(directory, '%Y-%m-%d').date() <= before)) :
+          path = os.path.join(location, directory)
+          self.log(self.PURGE, "CANDIDATE: %s" % path)
           if self.options.purge :
-            shutil.rmtree(os.path.join(location, directory))
-            self.log("- DELETED: %s" % directory)
-        else :
-          self.log(" SKIPPING: %s" % directory)
+            shutil.rmtree(path)
+            self.log(self.PURGE, "- DELETED: %s" % path)
+            self.log(self.APPLOG, "DELETED: %s" % path)
+          else :
+            self.log(self.PURGE, " SKIPPING: %s" % path)
 
   def lockdown(self) :
     lockfile = '/tmp/cleanup.lock'
