@@ -4,17 +4,21 @@ from fabric.api import *
 from string import Template
 import tempfile
 
-env.hosts = ['host1', 'host2']
+env.hosts = [
+    'host001',
+    'host002'
+]
 
 mongoservers = [
-    'mongoserver1:27017',
-    'mongoserver2:27017',
-    'mongoserver3:27017',
+    'mongoserver001:27017',
+    'mongoserver002:27017',
+    'mongoserver003:27017'
 ]
 
 databases = [
-    'db1',
-    'db2'
+    'db001',
+    'db002',
+    'db003'
 ]
 config = """---
 mongoservers:
@@ -23,7 +27,8 @@ $mongoservers
 databases:
 $databases
 
-searchdir: $cleandir
+searchdir:
+$cleandir
 """
 
 def yamllist(items) :
@@ -33,11 +38,14 @@ def yamllist(items) :
     return "\n".join([ "- %s" % x for x in items])
 
 def setupdir(values) :
+    """
+    Creates the directory if needed, and copies files into place.
+    """
     source = Template(config)
 
     with settings(warn_only=True) :
         if run("test -d ~/STORM_CLEANUP").failed :
-            run("mkdir STORM_CLEANUP")
+            run("umask 022 ; mkdir STORM_CLEANUP")
 
         with cd('STORM_CLEANUP') :
             put('cleanup.py', 'cleanup.py', mode=0755)
@@ -47,6 +55,9 @@ def setupdir(values) :
                 put(f.file, 'cleanup.yaml')
 
 def getstormdir() :
+    """
+    Checks with the storm configuration to get location of output files.
+    """
     with settings(warn_only=True) :
         if run("test -d /data1/stormexports").succeeded :
             return "/data1/stormexports"
@@ -59,15 +70,21 @@ def getstormdir() :
             return stormdir
 
 def cleanup() :
+    """
+    Removes the directory setup by this script.
+    """
     with settings(warn_only=True) :
         if run("test -d ~/STORM_CLEANUP").succeeded :
             run("rm -rf ~/STORM_CLEANUP")
 
 def install() :
+    """
+    Makes it all happen.
+    """
     values =  {
         'mongoservers': yamllist(mongoservers),
         'databases': yamllist(databases),
-        'cleandir': getstormdir()
+        'cleandir': yamllist([getstormdir()])
     }
 
     setupdir(values)
