@@ -4,17 +4,17 @@ from fabric.api import *
 from string import Template
 import tempfile
 
-env.hosts = ['fab-jpus01-stm-h1', 'fab-jpus01-nfs-h3']
+env.hosts = ['host1', 'host2']
 
 mongoservers = [
-    'fab-jpus01-mdb-h7.actiance.local:23757',
-    'fab-jpus01-mdb-h8.actiance.local:23757',
-    'fab-jpus01-mdb-h9.actiance.local:23757'
+    'mongoserver1:27017',
+    'mongoserver2:27017',
+    'mongoserver3:27017',
 ]
 
 databases = [
-    'jpmcpoc2',
-    'jpmcpoc3'
+    'db1',
+    'db2'
 ]
 config = """---
 mongoservers:
@@ -54,7 +54,7 @@ def getstormdir() :
         if run("test -f /apps/storm/conf/server.properties").failed :
             return '/data1/tmp'
 
-        with cd('/apps/storm/conf') :   
+        with cd('/apps/storm/conf') :
             stormdir = run("grep -E 'prop.temp.file.path\s*=\s*' server.properties | sed -e 's/.*=\s*//'")
             return stormdir
 
@@ -69,5 +69,5 @@ def install() :
         'databases': yamllist(databases),
         'cleandir': getstormdir()
     }
-    
+
     setupdir(values)
