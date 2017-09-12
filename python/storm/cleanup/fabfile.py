@@ -20,6 +20,7 @@ databases = [
     'db002',
     'db003'
 ]
+
 config = """---
 mongoservers:
 $mongoservers
@@ -29,6 +30,11 @@ $databases
 
 searchdir:
 $cleandir
+"""
+
+cron = """
+# Cleanup storm data directory. - Author - 20170131
+# $hour * * * * $path/cleanup.py --purge
 """
 
 def yamllist(items) :
@@ -42,17 +48,23 @@ def setupdir(values) :
     Creates the directory if needed, and copies files into place.
     """
     source = Template(config)
+    crontab = Template(cron)
 
     with settings(warn_only=True) :
-        if run("test -d ~/STORM_CLEANUP").failed :
-            run("umask 022 ; mkdir STORM_CLEANUP")
+        if run("test -d $path/STORM_CLEANUP").failed :
+            sudo("umask 022 ; mkdir -p $path/STORM_CLEANUP && sudo chown sysops:sysops $path/STORM_CLEANUP")
 
-        with cd('STORM_CLEANUP') :
+        with cd('$path/STORM_CLEANUP') :
             put('cleanup.py', 'cleanup.py', mode=0755)
             with tempfile.NamedTemporaryFile() as f :
                 f.write(source.substitute(values))
                 f.flush()
                 put(f.file, 'cleanup.yaml')
+            with tempfile.NamedTemporaryFile() as f :
+                f.write(crontab.substitute(values))
+                f.flush()
+                put(f.file, 'crontab.txt')
+            run('crontab crontab.txt')
 
 def getstormdir() :
     """
@@ -81,10 +93,12 @@ def install() :
     """
     Makes it all happen.
     """
+
     values =  {
         'mongoservers': yamllist(mongoservers),
         'databases': yamllist(databases),
-        'cleandir': yamllist([getstormdir()])
+        'cleandir': yamllist([getstormdir()]),
+        'hour': (env.hosts.index(env.host) % 6) * 10
     }
 
     setupdir(values)

@@ -98,7 +98,7 @@ class Cleanup(object) :
 
   def check_mongo(self, id) :
     """ Check mongo if ID exists and the current status """
-    states = [ 'CANCELLED', 'FAILED', 'COMPLETED', 'COMPLETEDWITHWARNING', 'MERGE_FAILED', 'UPLOAD_FAILED']
+    states = [ 'CANCELLED', 'FAILED', 'COMPLETED', 'COMPLETEDWITHWARNING', 'MERGE_FAILED', 'UPLOAD_FAILED', 'PACKAGING_FAILED']
     mongo = self.get_mongo()
     logstring = ("\n"
                  "- ID          : {_id}\n"
@@ -118,7 +118,8 @@ class Cleanup(object) :
 
     for database in self.databases :
       db = mongo[database]
-      result = db.job_request_config.find({'_id': id.split('_')[0]})
+      result = db.job_request_config.find({'_id': id.split('_')[0]}) 
+#      if result.count() > 0 and (list(result)[0]['status'] in states) :
       if result.count() > 0 :
         item = dict(list(result)[0].items() + {'DB': database}.items())
         now = datetime.utcnow()
@@ -144,7 +145,7 @@ class Cleanup(object) :
 
     for location in locations :
       for directory in os.listdir(location) :
-        if (patt.match(directory) and self.check_mongo(directory)) or (patt2.match(directory) and
+        if (patt.match(directory) and self.check_mongo(directory)) or (patt2.match(directory) and 
           (datetime.strptime(directory, '%Y-%m-%d').date() <= before)) :
           path = os.path.join(location, directory)
           self.log(self.PURGE, "CANDIDATE: %s" % path)
@@ -162,7 +163,7 @@ class Cleanup(object) :
       fcntl.lockf(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except IOError :
       print "Process already running.  Exiting .."
-      sys.exit(1)
+      sys.exit(1)    
     return fp
 
   def main(self) :
